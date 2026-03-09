@@ -39,6 +39,11 @@ def test_admin_can_create_resource_and_overlap_reservation_blocked():
         'end_at': (end + timedelta(minutes=30)).isoformat(),
     }, headers=user_headers)
     assert overlap.status_code == 409
+    assert overlap.json()["code"] == "HTTP_ERROR"
+
+    booked_only = client.get('/reservations?status=BOOKED', headers=user_headers)
+    assert booked_only.status_code == 200
+    assert len(booked_only.json()) == 1
 
 
 def test_owner_can_cancel_reservation():

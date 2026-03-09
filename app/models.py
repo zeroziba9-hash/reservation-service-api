@@ -1,4 +1,5 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from datetime import datetime
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
@@ -22,6 +23,11 @@ class Resource(Base):
 
 class Reservation(Base):
     __tablename__ = "reservations"
+    __table_args__ = (
+        CheckConstraint("end_at > start_at", name="ck_reservation_time_range"),
+        UniqueConstraint("resource_id", "start_at", "end_at", name="uq_reservation_exact_slot"),
+        Index("ix_reservations_lookup", "resource_id", "status", "start_at", "end_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -32,3 +38,14 @@ class Reservation(Base):
 
     user = relationship("User")
     resource = relationship("Resource")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String(50), nullable=False, index=True)
+    target = Column(String(100), nullable=False)
+    detail = Column(String(500), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, hash_password, verify_password
 from app.deps import get_current_user, get_db, require_admin
-from app.models import Reservation, Resource, User
+from app.models import AuditLog, Reservation, Resource, User
 from app.schemas import (
     ReservationCreate,
     ReservationOut,
@@ -17,6 +18,10 @@ from app.schemas import (
 )
 
 router = APIRouter()
+
+
+def write_audit(db: Session, actor_user_id: int | None, action: str, target: str, detail: str):
+    db.add(AuditLog(actor_user_id=actor_user_id, action=action, target=target, detail=detail))
 
 
 @router.get('/health')
@@ -38,6 +43,8 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
         role=role,
     )
     db.add(user)
+    db.flush()
+    write_audit(db, user.id, "auth.signup", f"user:{user.id}", f"role={user.role}")
     db.commit()
     db.refresh(user)
     return user
@@ -45,7 +52,6 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
 
 @router.post('/auth/login', response_model=TokenOut)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    # Swagger Authorize uses username/password form fields.
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid credentials")
@@ -58,10 +64,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 def create_resource(
     payload: ResourceCreate,
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     resource = Resource(name=payload.name)
     db.add(resource)
+    db.flush()
+    write_audit(db, admin.id, "resource.create", f"resource:{resource.id}", payload.name)
     db.commit()
     db.refresh(resource)
     return resource
@@ -103,6 +111,14 @@ def create_reservation(
         status="BOOKED",
     )
     db.add(row)
+    db.flush()
+    write_audit(
+        db,
+        user.id,
+        "reservation.create",
+        f"reservation:{row.id}",
+        f"resource_id={row.resource_id}, {row.start_at.isoformat()}~{row.end_at.isoformat()}",
+    )
     db.commit()
     db.refresh(row)
     return row
@@ -110,10 +126,23 @@ def create_reservation(
 
 @router.get('/reservations', response_model=list[ReservationOut])
 def list_reservations(
+    status: str | None = Query(default=None, description="BOOKED or CANCELED"),
+    resource_id: int | None = Query(default=None),
+    from_at: datetime | None = Query(default=None),
+    to_at: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    return db.query(Reservation).order_by(Reservation.start_at.asc()).all()
+    q = db.query(Reservation)
+    if status:
+        q = q.filter(Reservation.status == status)
+    if resource_id:
+        q = q.filter(Reservation.resource_id == resource_id)
+    if from_at:
+        q = q.filter(Reservation.end_at >= from_at)
+    if to_at:
+        q = q.filter(Reservation.start_at <= to_at)
+    return q.order_by(Reservation.start_at.asc()).all()
 
 
 @router.post('/reservations/{reservation_id}/cancel', response_model=ReservationOut)
@@ -130,6 +159,7 @@ def cancel_reservation(
         raise HTTPException(status_code=403, detail="no permission")
 
     row.status = "CANCELED"
+    write_audit(db, user.id, "reservation.cancel", f"reservation:{row.id}", "status=CANCELED")
     db.commit()
     db.refresh(row)
     return row
