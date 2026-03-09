@@ -8,7 +8,7 @@ client = TestClient(app)
 def signup_and_token(email: str, name: str, password: str):
     s = client.post('/auth/signup', json={"email": email, "name": name, "password": password})
     assert s.status_code in (200, 409)
-    l = client.post('/auth/login', json={"email": email, "password": password})
+    l = client.post('/auth/login', data={"username": email, "password": password})
     assert l.status_code == 200
     token = l.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
