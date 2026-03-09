@@ -1,7 +1,12 @@
 from pathlib import Path
+import sys
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.db.base import Base
 import app.models  # noqa: F401
