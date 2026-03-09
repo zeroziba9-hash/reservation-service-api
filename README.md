@@ -4,9 +4,10 @@ Production-minded FastAPI starter template.
 
 ## Included Features
 - Health check endpoint
-- User/Resource/Reservation CRUD skeleton
+- JWT authentication (signup/login)
+- Role-based authorization (first user becomes ADMIN)
 - Overlap-safe reservation creation (409 on conflict)
-- Reservation cancel flow
+- Reservation cancel flow (owner/admin)
 - Pytest tests + GitHub Actions CI
 
 ## Stack
@@ -37,8 +38,9 @@ docker compose up -d
 
 ## Main Endpoints
 - `GET /health`
-- `POST /users`
-- `POST /resources`
-- `POST /reservations`
-- `GET /reservations`
-- `POST /reservations/{reservation_id}/cancel`
+- `POST /auth/signup`
+- `POST /auth/login`
+- `POST /resources` (admin only)
+- `POST /reservations` (auth required)
+- `GET /reservations` (auth required)
+- `POST /reservations/{reservation_id}/cancel` (owner/admin)

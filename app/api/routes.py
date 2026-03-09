@@ -2,14 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.deps import get_db
+from app.core.security import create_access_token, hash_password, verify_password
+from app.deps import get_current_user, get_db, require_admin
 from app.models import Reservation, Resource, User
 from app.schemas import (
+    LoginRequest,
     ReservationCreate,
     ReservationOut,
     ResourceCreate,
     ResourceOut,
-    UserCreate,
+    SignupRequest,
+    TokenOut,
     UserOut,
 )
 
@@ -21,17 +24,41 @@ def health():
     return {"status": "ok"}
 
 
-@router.post('/users', response_model=UserOut)
-def create_user(payload: UserCreate, db: Session = Depends(get_db)):
-    user = User(name=payload.name, role=payload.role)
+@router.post('/auth/signup', response_model=UserOut)
+def signup(payload: SignupRequest, db: Session = Depends(get_db)):
+    exists = db.query(User).filter(User.email == payload.email).first()
+    if exists:
+        raise HTTPException(status_code=409, detail="email already exists")
+
+    role = "ADMIN" if db.query(User).count() == 0 else "USER"
+    user = User(
+        email=payload.email,
+        name=payload.name,
+        password_hash=hash_password(payload.password),
+        role=role,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
 
 
+@router.post('/auth/login', response_model=TokenOut)
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+
+    token = create_access_token(user.email)
+    return TokenOut(access_token=token)
+
+
 @router.post('/resources', response_model=ResourceOut)
-def create_resource(payload: ResourceCreate, db: Session = Depends(get_db)):
+def create_resource(
+    payload: ResourceCreate,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
     resource = Resource(name=payload.name)
     db.add(resource)
     db.commit()
@@ -40,13 +67,13 @@ def create_resource(payload: ResourceCreate, db: Session = Depends(get_db)):
 
 
 @router.post('/reservations', response_model=ReservationOut)
-def create_reservation(payload: ReservationCreate, db: Session = Depends(get_db)):
+def create_reservation(
+    payload: ReservationCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     if payload.start_at >= payload.end_at:
         raise HTTPException(status_code=400, detail="start_at must be before end_at")
-
-    user = db.get(User, payload.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="user not found")
 
     resource = db.get(Resource, payload.resource_id)
     if not resource:
@@ -68,7 +95,7 @@ def create_reservation(payload: ReservationCreate, db: Session = Depends(get_db)
         raise HTTPException(status_code=409, detail="time slot already booked")
 
     row = Reservation(
-        user_id=payload.user_id,
+        user_id=user.id,
         resource_id=payload.resource_id,
         start_at=payload.start_at,
         end_at=payload.end_at,
@@ -81,15 +108,26 @@ def create_reservation(payload: ReservationCreate, db: Session = Depends(get_db)
 
 
 @router.get('/reservations', response_model=list[ReservationOut])
-def list_reservations(db: Session = Depends(get_db)):
+def list_reservations(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
     return db.query(Reservation).order_by(Reservation.start_at.asc()).all()
 
 
 @router.post('/reservations/{reservation_id}/cancel', response_model=ReservationOut)
-def cancel_reservation(reservation_id: int, db: Session = Depends(get_db)):
+def cancel_reservation(
+    reservation_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     row = db.get(Reservation, reservation_id)
     if not row:
         raise HTTPException(status_code=404, detail="reservation not found")
+
+    if user.role != "ADMIN" and row.user_id != user.id:
+        raise HTTPException(status_code=403, detail="no permission")
+
     row.status = "CANCELED"
     db.commit()
     db.refresh(row)

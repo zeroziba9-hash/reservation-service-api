@@ -5,44 +5,60 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_create_and_overlap_reservation():
-    u = client.post('/users', json={'name': 'alice', 'role': 'USER'}).json()
-    r = client.post('/resources', json={'name': 'room-a'}).json()
+def signup_and_token(email: str, name: str, password: str):
+    s = client.post('/auth/signup', json={"email": email, "name": name, "password": password})
+    assert s.status_code in (200, 409)
+    l = client.post('/auth/login', json={"email": email, "password": password})
+    assert l.status_code == 200
+    token = l.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_admin_can_create_resource_and_overlap_reservation_blocked():
+    admin_headers = signup_and_token("admin@test.com", "admin", "pass1234")
+
+    r = client.post('/resources', json={'name': 'room-a'}, headers=admin_headers)
+    assert r.status_code == 200
+    resource_id = r.json()['id']
+
+    user_headers = signup_and_token("alice@test.com", "alice", "pass1234")
 
     start = datetime(2026, 3, 10, 10, 0, 0)
     end = start + timedelta(hours=2)
 
     ok = client.post('/reservations', json={
-        'user_id': u['id'],
-        'resource_id': r['id'],
+        'resource_id': resource_id,
         'start_at': start.isoformat(),
         'end_at': end.isoformat(),
-    })
+    }, headers=user_headers)
     assert ok.status_code == 200
 
     overlap = client.post('/reservations', json={
-        'user_id': u['id'],
-        'resource_id': r['id'],
+        'resource_id': resource_id,
         'start_at': (start + timedelta(minutes=30)).isoformat(),
         'end_at': (end + timedelta(minutes=30)).isoformat(),
-    })
+    }, headers=user_headers)
     assert overlap.status_code == 409
 
 
-def test_cancel_reservation():
-    u = client.post('/users', json={'name': 'bob', 'role': 'USER'}).json()
-    r = client.post('/resources', json={'name': 'room-b'}).json()
+def test_owner_can_cancel_reservation():
+    admin_headers = signup_and_token("admin2@test.com", "admin2", "pass1234")
+    r = client.post('/resources', json={'name': 'room-b'}, headers=admin_headers)
+    assert r.status_code == 200
+
+    user_headers = signup_and_token("bob@test.com", "bob", "pass1234")
 
     start = datetime(2026, 3, 10, 13, 0, 0)
     end = start + timedelta(hours=1)
 
     created = client.post('/reservations', json={
-        'user_id': u['id'],
-        'resource_id': r['id'],
+        'resource_id': r.json()['id'],
         'start_at': start.isoformat(),
         'end_at': end.isoformat(),
-    }).json()
+    }, headers=user_headers)
+    assert created.status_code == 200
 
-    canceled = client.post(f"/reservations/{created['id']}/cancel")
+    reservation_id = created.json()['id']
+    canceled = client.post(f"/reservations/{reservation_id}/cancel", headers=user_headers)
     assert canceled.status_code == 200
     assert canceled.json()['status'] == 'CANCELED'

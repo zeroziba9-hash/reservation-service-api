@@ -1,19 +1,30 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 
-class UserCreate(BaseModel):
+class SignupRequest(BaseModel):
+    email: EmailStr
     name: str = Field(min_length=2, max_length=100)
-    role: str = "USER"
+    password: str = Field(min_length=4, max_length=64)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 class UserOut(BaseModel):
     id: int
+    email: EmailStr
     name: str
     role: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ResourceCreate(BaseModel):
@@ -24,12 +35,10 @@ class ResourceOut(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReservationCreate(BaseModel):
-    user_id: int
     resource_id: int
     start_at: datetime
     end_at: datetime
@@ -43,5 +52,4 @@ class ReservationOut(BaseModel):
     end_at: datetime
     status: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
