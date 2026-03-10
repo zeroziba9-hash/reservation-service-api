@@ -12,5 +12,8 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    idempotency_ttl_seconds: int = 60 * 60 * 24
+    idempotency_lock_seconds: int = 30
+
 
 settings = Settings()

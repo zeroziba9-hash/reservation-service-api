@@ -44,6 +44,8 @@ REDIS_URL=redis://localhost:6379/0
 SECRET_KEY=change-this-in-prod
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
+IDEMPOTENCY_TTL_SECONDS=86400
+IDEMPOTENCY_LOCK_SECONDS=30
 ```
 
 ---
@@ -80,7 +82,7 @@ python -m pytest -q
 ```
 
 Expected result:
-- `6 passed`
+- `9 passed`
 
 ---
 
@@ -90,14 +92,22 @@ Expected result:
 
 ---
 
-## 7) 인프라 (Infra)
+## 7) Idempotency-Key 동작 규칙
+- 헤더 없음: 기존과 동일하게 일반 예약 생성
+- 같은 `Idempotency-Key` + 같은 payload: 같은 예약 결과 재반환
+- 같은 `Idempotency-Key` + 다른 payload: `409`
+- 같은 `Idempotency-Key` 요청 처리 중 재호출: `409 (in progress)`
+
+---
+
+## 8) 인프라 (Infra)
 ```bash
 docker compose up -d
 ```
 
 ---
 
-## 7) 주요 API (Main Endpoints)
+## 9) 주요 API (Main Endpoints)
 - `GET /health`
 - `POST /auth/signup`
 - `POST /auth/login`
@@ -112,7 +122,7 @@ docker compose up -d
 
 ---
 
-## 8) 표준 에러 응답 (Standard Error Body)
+## 10) 표준 에러 응답 (Standard Error Body)
 ```json
 {
   "timestamp": "2026-03-09T14:00:00Z",
@@ -125,7 +135,7 @@ docker compose up -d
 
 ---
 
-## 9) 프로젝트 구조 (Project Structure)
+## 11) 프로젝트 구조 (Project Structure)
 - `app/api/routes.py` : API 엔드포인트
 - `app/core/security.py` : JWT, password hash
 - `app/core/errors.py` : 전역 예외 응답 포맷

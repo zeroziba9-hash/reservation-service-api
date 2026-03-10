@@ -9,6 +9,7 @@ from redis.exceptions import RedisError
 from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.deps import get_current_user, get_db, get_redis, require_admin
 from app.models import AuditLog, Reservation, Resource, User
@@ -195,11 +196,18 @@ def create_reservation(
         raise HTTPException(status_code=400, detail="start_at must be before end_at")
 
     request_hash = build_reservation_request_hash(payload.resource_id, start_at, end_at)
-    redis_key = None
+    redis_data_key = None
+    redis_lock_key = None
     if idempotency_key:
-        redis_key = f"idem:reservation:create:user:{user.id}:{idempotency_key}"
+        if len(idempotency_key) > 128:
+            raise HTTPException(status_code=400, detail="idempotency key too long (max 128)")
+
+        key_scope = f"idem:reservation:create:user:{user.id}:{idempotency_key}"
+        redis_data_key = f"{key_scope}:data"
+        redis_lock_key = f"{key_scope}:lock"
+
         try:
-            cached = redis.get(redis_key)
+            cached = redis.get(redis_data_key)
         except RedisError as exc:
             raise HTTPException(status_code=503, detail=f"idempotency store unavailable: {exc}")
 
@@ -217,6 +225,25 @@ def create_reservation(
             )
             if existing_row:
                 return existing_row
+
+        lock_acquired = redis.set(redis_lock_key, request_hash, nx=True, ex=settings.idempotency_lock_seconds)
+        if not lock_acquired:
+            cached = redis.get(redis_data_key)
+            if cached:
+                cached_data = json.loads(cached)
+                if cached_data.get("request_hash") != request_hash:
+                    raise HTTPException(status_code=409, detail="idempotency key already used with different payload")
+                cached_id = int(cached_data["reservation_id"])
+                existing_row = (
+                    db.query(Reservation)
+                    .options(joinedload(Reservation.resource), joinedload(Reservation.user))
+                    .filter(Reservation.id == cached_id)
+                    .first()
+                )
+                if existing_row:
+                    return existing_row
+
+            raise HTTPException(status_code=409, detail="request with same idempotency key is in progress")
 
     resource = db.query(Resource).filter(Resource.id == payload.resource_id).with_for_update().first()
     if not resource:
@@ -244,15 +271,21 @@ def create_reservation(
     )
     db.commit()
 
-    if redis_key:
+    if redis_data_key:
         try:
             redis.setex(
-                redis_key,
-                60 * 60 * 24,
+                redis_data_key,
+                settings.idempotency_ttl_seconds,
                 json.dumps({"reservation_id": row.id, "request_hash": request_hash}),
             )
         except RedisError:
             pass
+        finally:
+            if redis_lock_key:
+                try:
+                    redis.delete(redis_lock_key)
+                except RedisError:
+                    pass
 
     return (
         db.query(Reservation)

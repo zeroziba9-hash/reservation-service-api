@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app)
@@ -43,7 +44,6 @@ def test_admin_can_create_resource_and_overlap_reservation_blocked():
     assert overlap.json()["code"] == "HTTP_ERROR"
 
 
-
 def test_owner_can_cancel_reservation_idempotent():
     admin_headers = signup_and_token("admin2@test.com", "admin2", "pass1234")
     r = client.post('/resources', json={'name': 'room-b'}, headers=admin_headers)
@@ -66,7 +66,6 @@ def test_owner_can_cancel_reservation_idempotent():
     canceled_again = client.post(f"/reservations/{reservation_id}/cancel", headers=user_headers)
     assert canceled_again.status_code == 200
     assert canceled_again.json()['status'] == 'CANCELED'
-
 
 
 def test_list_reservations_supports_pagination_status_and_scope():
@@ -108,7 +107,6 @@ def test_list_reservations_supports_pagination_status_and_scope():
     admin_all = client.get('/reservations', headers=admin_headers)
     assert admin_all.status_code == 200
     assert len(admin_all.json()) == 4
-
 
 
 def test_timezone_required_and_resource_crud():
@@ -167,7 +165,7 @@ def test_create_reservation_with_idempotency_key_returns_same_result():
     assert resource.status_code == 200
 
     user_headers = signup_and_token("grace@test.com", "grace", "pass1234")
-    idempotent_headers = {**user_headers, "Idempotency-Key": "idem-key-001"}
+    idempotent_headers = {**user_headers, "idempotency-key": "idem-key-001"}
 
     payload = {
         'resource_id': resource.json()['id'],
@@ -181,9 +179,22 @@ def test_create_reservation_with_idempotency_key_returns_same_result():
     assert second.status_code == 200
     assert first.json()['id'] == second.json()['id']
 
-    mismatch = client.post(
-        '/reservations',
-        json={**payload, 'end_at': dt(20)},
-        headers=idempotent_headers,
-    )
+    mismatch = client.post('/reservations', json={**payload, 'end_at': dt(20)}, headers=idempotent_headers)
     assert mismatch.status_code == 409
+
+
+def test_idempotency_key_too_long_returns_400():
+    admin_headers = signup_and_token("admin7@test.com", "admin7", "pass1234")
+    resource = client.post('/resources', json={'name': 'room-g'}, headers=admin_headers)
+    assert resource.status_code == 200
+
+    user_headers = signup_and_token("hannah@test.com", "hannah", "pass1234")
+    too_long = "k" * 129
+    headers = {**user_headers, "idempotency-key": too_long}
+
+    res = client.post('/reservations', json={
+        'resource_id': resource.json()['id'],
+        'start_at': dt(20),
+        'end_at': dt(21),
+    }, headers=headers)
+    assert res.status_code == 400

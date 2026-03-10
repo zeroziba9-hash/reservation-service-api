@@ -39,8 +39,17 @@ class FakeRedis:
     def get(self, key: str):
         return self.store.get(key)
 
+    def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        if nx and key in self.store:
+            return False
+        self.store[key] = value
+        return True
+
     def setex(self, key: str, _seconds: int, value: str):
         self.store[key] = value
+
+    def delete(self, key: str):
+        self.store.pop(key, None)
 
 
 def override_get_redis():
