@@ -7,7 +7,6 @@ Create Date: 2026-03-10
 
 from alembic import op
 
-
 revision = "0002_pg_exclusion_constraint"
 down_revision = "0001_init"
 branch_labels = None
@@ -20,8 +19,7 @@ def upgrade() -> None:
         return
 
     op.execute("CREATE EXTENSION IF NOT EXISTS btree_gist")
-    op.execute(
-        """
+    op.execute("""
         ALTER TABLE reservations
         ADD CONSTRAINT ex_reservations_no_overlap
         EXCLUDE USING gist (
@@ -29,8 +27,7 @@ def upgrade() -> None:
           tsrange(start_at, end_at, '[)') WITH &&
         )
         WHERE (status = 'BOOKED')
-        """
-    )
+        """)
 
 
 def downgrade() -> None:
@@ -38,9 +35,7 @@ def downgrade() -> None:
     if bind.dialect.name != "postgresql":
         return
 
-    op.execute(
-        """
+    op.execute("""
         ALTER TABLE reservations
         DROP CONSTRAINT IF EXISTS ex_reservations_no_overlap
-        """
-    )
+        """)

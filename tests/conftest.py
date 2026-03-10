@@ -1,5 +1,6 @@
-from pathlib import Path
 import sys
+from pathlib import Path
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,10 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.db.base import Base
 import app.models  # noqa: F401
-from app.main import app
+from app.db.base import Base
 from app.deps import get_db, get_redis
+from app.main import app
 
 TEST_DB_FILE = Path("test_app.db")
 TEST_DB_URL = "sqlite:///./test_app.db"

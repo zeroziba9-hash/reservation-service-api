@@ -5,9 +5,9 @@ Revises:
 Create Date: 2026-03-09
 """
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "0001_init"
 down_revision = None
@@ -44,7 +44,12 @@ def upgrade() -> None:
         sa.CheckConstraint("end_at > start_at", name="ck_reservation_time_range"),
         sa.UniqueConstraint("resource_id", "start_at", "end_at", name="uq_reservation_exact_slot"),
     )
-    op.create_index("ix_reservations_lookup", "reservations", ["resource_id", "status", "start_at", "end_at"], unique=False)
+    op.create_index(
+        "ix_reservations_lookup",
+        "reservations",
+        ["resource_id", "status", "start_at", "end_at"],
+        unique=False,
+    )
 
     op.create_table(
         "audit_logs",

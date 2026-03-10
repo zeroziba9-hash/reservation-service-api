@@ -19,7 +19,7 @@ Production-minded reservation API template with auth, RBAC, and safe booking flo
 - Audit log 기록 (signup/resource/reservation)
 - 표준 에러 응답 포맷 (standardized error body)
 - Alembic migration baseline
-- Pytest + GitHub Actions CI
+- Ruff + Black + Pytest + GitHub Actions CI
 
 ---
 
@@ -67,6 +67,11 @@ Windows one-command start:
 Windows PostgreSQL start (docker compose + migration + run):
 ```powershell
 ./scripts/dev_start_pg.ps1
+```
+
+Windows quality gate check:
+```powershell
+./scripts/check.ps1
 ```
 
 Swagger Docs:

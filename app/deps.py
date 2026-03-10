@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
 from redis import Redis
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import decode_access_token

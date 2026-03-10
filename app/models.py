@@ -1,6 +1,17 @@
 from datetime import datetime, timezone
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
+
 from app.db.base import Base
 
 
@@ -56,4 +67,6 @@ class AuditLog(Base):
     action = Column(String(50), nullable=False, index=True)
     target = Column(String(100), nullable=False)
     detail = Column(String(500), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )

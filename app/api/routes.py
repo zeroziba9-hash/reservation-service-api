@@ -1,8 +1,9 @@
-from datetime import datetime, timezone
 import hashlib
 import json
+from datetime import datetime, timezone
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from redis import Redis
 from redis.exceptions import RedisError
@@ -34,7 +35,9 @@ def write_audit(db: Session, actor_user_id: int | None, action: str, target: str
 
 def to_utc_naive(value: datetime, field_name: str) -> datetime:
     if value.tzinfo is None:
-        raise HTTPException(status_code=400, detail=f"{field_name} must include timezone (UTC recommended)")
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must include timezone (UTC recommended)"
+        )
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
@@ -74,13 +77,13 @@ def build_reservation_request_hash(resource_id: int, start_at: datetime, end_at:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-@router.get('/health')
+@router.get("/health")
 def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     return {"status": "ok", "db": "ok"}
 
 
-@router.post('/auth/signup', response_model=UserOut)
+@router.post("/auth/signup", response_model=UserOut)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     exists = db.query(User).filter(User.email == payload.email).first()
     if exists:
@@ -101,7 +104,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     return user
 
 
-@router.post('/auth/login', response_model=TokenOut)
+@router.post("/auth/login", response_model=TokenOut)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
@@ -111,7 +114,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     return TokenOut(access_token=token)
 
 
-@router.post('/resources', response_model=ResourceOut)
+@router.post("/resources", response_model=ResourceOut)
 def create_resource(
     payload: ResourceCreate,
     db: Session = Depends(get_db),
@@ -130,12 +133,12 @@ def create_resource(
     return resource
 
 
-@router.get('/resources', response_model=list[ResourceOut])
+@router.get("/resources", response_model=list[ResourceOut])
 def list_resources(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     return db.query(Resource).order_by(Resource.id.asc()).all()
 
 
-@router.patch('/resources/{resource_id}', response_model=ResourceOut)
+@router.patch("/resources/{resource_id}", response_model=ResourceOut)
 def update_resource(
     resource_id: int,
     payload: ResourceUpdate,
@@ -146,19 +149,23 @@ def update_resource(
     if not resource:
         raise HTTPException(status_code=404, detail="resource not found")
 
-    duplicated = db.query(Resource).filter(Resource.name == payload.name, Resource.id != resource_id).first()
+    duplicated = (
+        db.query(Resource).filter(Resource.name == payload.name, Resource.id != resource_id).first()
+    )
     if duplicated:
         raise HTTPException(status_code=409, detail="resource name already exists")
 
     old_name = resource.name
     resource.name = payload.name
-    write_audit(db, admin.id, "resource.update", f"resource:{resource.id}", f"{old_name} -> {resource.name}")
+    write_audit(
+        db, admin.id, "resource.update", f"resource:{resource.id}", f"{old_name} -> {resource.name}"
+    )
     db.commit()
     db.refresh(resource)
     return resource
 
 
-@router.delete('/resources/{resource_id}')
+@router.delete("/resources/{resource_id}")
 def delete_resource(
     resource_id: int,
     db: Session = Depends(get_db),
@@ -168,10 +175,14 @@ def delete_resource(
     if not resource:
         raise HTTPException(status_code=404, detail="resource not found")
 
-    has_future_booked = db.query(Reservation).filter(
-        Reservation.resource_id == resource_id,
-        Reservation.status == "BOOKED",
-    ).first()
+    has_future_booked = (
+        db.query(Reservation)
+        .filter(
+            Reservation.resource_id == resource_id,
+            Reservation.status == "BOOKED",
+        )
+        .first()
+    )
     if has_future_booked:
         raise HTTPException(status_code=409, detail="resource has active reservations")
 
@@ -181,7 +192,7 @@ def delete_resource(
     return {"deleted": True}
 
 
-@router.post('/reservations', response_model=ReservationOut)
+@router.post("/reservations", response_model=ReservationOut)
 def create_reservation(
     payload: ReservationCreate,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -214,7 +225,9 @@ def create_reservation(
         if cached:
             cached_data = json.loads(cached)
             if cached_data.get("request_hash") != request_hash:
-                raise HTTPException(status_code=409, detail="idempotency key already used with different payload")
+                raise HTTPException(
+                    status_code=409, detail="idempotency key already used with different payload"
+                )
 
             cached_id = int(cached_data["reservation_id"])
             existing_row = (
@@ -226,13 +239,18 @@ def create_reservation(
             if existing_row:
                 return existing_row
 
-        lock_acquired = redis.set(redis_lock_key, request_hash, nx=True, ex=settings.idempotency_lock_seconds)
+        lock_acquired = redis.set(
+            redis_lock_key, request_hash, nx=True, ex=settings.idempotency_lock_seconds
+        )
         if not lock_acquired:
             cached = redis.get(redis_data_key)
             if cached:
                 cached_data = json.loads(cached)
                 if cached_data.get("request_hash") != request_hash:
-                    raise HTTPException(status_code=409, detail="idempotency key already used with different payload")
+                    raise HTTPException(
+                        status_code=409,
+                        detail="idempotency key already used with different payload",
+                    )
                 cached_id = int(cached_data["reservation_id"])
                 existing_row = (
                     db.query(Reservation)
@@ -243,9 +261,13 @@ def create_reservation(
                 if existing_row:
                     return existing_row
 
-            raise HTTPException(status_code=409, detail="request with same idempotency key is in progress")
+            raise HTTPException(
+                status_code=409, detail="request with same idempotency key is in progress"
+            )
 
-    resource = db.query(Resource).filter(Resource.id == payload.resource_id).with_for_update().first()
+    resource = (
+        db.query(Resource).filter(Resource.id == payload.resource_id).with_for_update().first()
+    )
     if not resource:
         raise HTTPException(status_code=404, detail="resource not found")
 
@@ -295,7 +317,7 @@ def create_reservation(
     )
 
 
-@router.patch('/reservations/{reservation_id}', response_model=ReservationOut)
+@router.patch("/reservations/{reservation_id}", response_model=ReservationOut)
 def update_reservation(
     reservation_id: int,
     payload: ReservationUpdate,
@@ -330,7 +352,13 @@ def update_reservation(
 
     row.start_at = start_at
     row.end_at = end_at
-    write_audit(db, user.id, "reservation.update", f"reservation:{row.id}", f"{start_at.isoformat()}~{end_at.isoformat()}")
+    write_audit(
+        db,
+        user.id,
+        "reservation.update",
+        f"reservation:{row.id}",
+        f"{start_at.isoformat()}~{end_at.isoformat()}",
+    )
     db.commit()
 
     return (
@@ -341,9 +369,11 @@ def update_reservation(
     )
 
 
-@router.get('/reservations', response_model=list[ReservationOut])
+@router.get("/reservations", response_model=list[ReservationOut])
 def list_reservations(
-    status: Literal["BOOKED", "CANCELED"] | None = Query(default=None, description="BOOKED or CANCELED"),
+    status: Literal["BOOKED", "CANCELED"] | None = Query(
+        default=None, description="BOOKED or CANCELED"
+    ),
     resource_id: int | None = Query(default=None),
     from_at: datetime | None = Query(default=None),
     to_at: datetime | None = Query(default=None),
@@ -352,7 +382,9 @@ def list_reservations(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    q = db.query(Reservation).options(joinedload(Reservation.resource), joinedload(Reservation.user))
+    q = db.query(Reservation).options(
+        joinedload(Reservation.resource), joinedload(Reservation.user)
+    )
     if user.role != "ADMIN":
         q = q.filter(Reservation.user_id == user.id)
 
@@ -367,7 +399,7 @@ def list_reservations(
     return q.order_by(Reservation.start_at.asc()).offset(offset).limit(limit).all()
 
 
-@router.post('/reservations/{reservation_id}/cancel', response_model=ReservationOut)
+@router.post("/reservations/{reservation_id}/cancel", response_model=ReservationOut)
 def cancel_reservation(
     reservation_id: int,
     db: Session = Depends(get_db),
