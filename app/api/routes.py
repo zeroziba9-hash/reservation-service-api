@@ -265,56 +265,60 @@ def create_reservation(
                 status_code=409, detail="request with same idempotency key is in progress"
             )
 
-    resource = (
-        db.query(Resource).filter(Resource.id == payload.resource_id).with_for_update().first()
-    )
-    if not resource:
-        raise HTTPException(status_code=404, detail="resource not found")
+    row = None
+    try:
+        resource = (
+            db.query(Resource).filter(Resource.id == payload.resource_id).with_for_update().first()
+        )
+        if not resource:
+            raise HTTPException(status_code=404, detail="resource not found")
 
-    overlap = find_overlap(db, resource_id=payload.resource_id, start_at=start_at, end_at=end_at)
-    if overlap:
-        raise HTTPException(status_code=409, detail="time slot already booked")
+        overlap = find_overlap(
+            db, resource_id=payload.resource_id, start_at=start_at, end_at=end_at
+        )
+        if overlap:
+            raise HTTPException(status_code=409, detail="time slot already booked")
 
-    row = Reservation(
-        user_id=user.id,
-        resource_id=payload.resource_id,
-        start_at=start_at,
-        end_at=end_at,
-        status="BOOKED",
-    )
-    db.add(row)
-    db.flush()
-    write_audit(
-        db,
-        user.id,
-        "reservation.create",
-        f"reservation:{row.id}",
-        f"resource_id={row.resource_id}, {row.start_at.isoformat()}~{row.end_at.isoformat()}",
-    )
-    db.commit()
+        row = Reservation(
+            user_id=user.id,
+            resource_id=payload.resource_id,
+            start_at=start_at,
+            end_at=end_at,
+            status="BOOKED",
+        )
+        db.add(row)
+        db.flush()
+        write_audit(
+            db,
+            user.id,
+            "reservation.create",
+            f"reservation:{row.id}",
+            f"resource_id={row.resource_id}, {row.start_at.isoformat()}~{row.end_at.isoformat()}",
+        )
+        db.commit()
 
-    if redis_data_key:
-        try:
-            redis.setex(
-                redis_data_key,
-                settings.idempotency_ttl_seconds,
-                json.dumps({"reservation_id": row.id, "request_hash": request_hash}),
-            )
-        except RedisError:
-            pass
-        finally:
-            if redis_lock_key:
-                try:
-                    redis.delete(redis_lock_key)
-                except RedisError:
-                    pass
+        if redis_data_key:
+            try:
+                redis.setex(
+                    redis_data_key,
+                    settings.idempotency_ttl_seconds,
+                    json.dumps({"reservation_id": row.id, "request_hash": request_hash}),
+                )
+            except RedisError:
+                pass
 
-    return (
-        db.query(Reservation)
-        .options(joinedload(Reservation.resource), joinedload(Reservation.user))
-        .filter(Reservation.id == row.id)
-        .first()
-    )
+        return (
+            db.query(Reservation)
+            .options(joinedload(Reservation.resource), joinedload(Reservation.user))
+            .filter(Reservation.id == row.id)
+            .first()
+        )
+    finally:
+        if redis_lock_key:
+            try:
+                redis.delete(redis_lock_key)
+            except RedisError:
+                pass
 
 
 @router.patch("/reservations/{reservation_id}", response_model=ReservationOut)

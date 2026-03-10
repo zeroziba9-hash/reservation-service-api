@@ -87,7 +87,7 @@ python -m pytest -q
 ```
 
 Expected result:
-- `9 passed`
+- `8 passed`
 
 ---
 
