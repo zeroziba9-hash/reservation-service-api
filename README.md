@@ -10,7 +10,7 @@ Production-minded reservation API template with auth, RBAC, and safe booking flo
 - JWT 인증 (signup/login)
 - Role 기반 권한 제어 (첫 가입자 ADMIN)
 - 리소스 CRUD (admin only)
-- 예약 중복 방지 (409 Conflict)
+- 예약 중복 방지 (409 Conflict, PostgreSQL은 EXCLUDE 제약으로 DB 레벨 보호)
 - 예약 수정 / 취소 (owner/admin)
 - 예약 조회 필터 + 페이지네이션 (`status`, `resource_id`, `from_at`, `to_at`, `limit`, `offset`)
 - 예약 조회 권한 분리 (USER=본인, ADMIN=전체)
@@ -83,7 +83,13 @@ Expected result:
 
 ---
 
-## 6) 인프라 (Infra)
+## 6) PostgreSQL 동시성 보호 (DB Constraint)
+- Alembic `0002_pg_exclusion_constraint`는 PostgreSQL에서만 적용됩니다.
+- `reservations` 테이블에 `EXCLUDE USING gist` 제약을 추가해, 동일 resource의 시간대 겹침(BOOKED 상태)을 DB 레벨에서 차단합니다.
+
+---
+
+## 7) 인프라 (Infra)
 ```bash
 docker compose up -d
 ```
