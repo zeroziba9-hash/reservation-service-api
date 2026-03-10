@@ -6,7 +6,7 @@ Production-minded reservation API template with auth, RBAC, and safe booking flo
 ---
 
 ## 1) 핵심 기능 (Included Features)
-- Health check endpoint (`GET /health`, DB ping 포함)
+- Health/Readiness endpoint (`GET /health`, `GET /ready` with DB ping)
 - JWT 인증 (signup/login)
 - Role 기반 권한 제어 (첫 가입자 ADMIN)
 - 리소스 CRUD (admin only)
@@ -19,6 +19,7 @@ Production-minded reservation API template with auth, RBAC, and safe booking flo
 - Audit log 기록 (signup/resource/reservation)
 - 표준 에러 응답 포맷 (standardized error body)
 - Alembic migration baseline
+- 구조화 로그(JSON) + Request ID (`X-Request-ID`) 추적
 - Ruff + Black + Pytest + GitHub Actions CI
 
 ---
@@ -87,7 +88,7 @@ python -m pytest -q
 ```
 
 Expected result:
-- `8 passed`
+- `10 passed`
 
 ---
 
@@ -114,6 +115,7 @@ docker compose up -d
 
 ## 9) 주요 API (Main Endpoints)
 - `GET /health`
+- `GET /ready`
 - `POST /auth/signup`
 - `POST /auth/login`
 - `POST /resources` (admin)

@@ -78,9 +78,14 @@ def build_reservation_request_hash(resource_id: int, start_at: datetime, end_at:
 
 
 @router.get("/health")
-def health(db: Session = Depends(get_db)):
+def health():
+    return {"status": "ok"}
+
+
+@router.get("/ready")
+def ready(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
-    return {"status": "ok", "db": "ok"}
+    return {"status": "ready", "db": "ok"}
 
 
 @router.post("/auth/signup", response_model=UserOut)
