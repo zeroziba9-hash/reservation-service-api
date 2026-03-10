@@ -12,6 +12,15 @@ def test_health():
     assert "X-Request-ID" in res.headers
 
 
+def test_health_with_envelope():
+    res = client.get("/health", headers={"X-Response-Envelope": "true"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["success"] is True
+    assert body["data"]["status"] == "ok"
+    assert body["request_id"] == res.headers.get("X-Request-ID")
+
+
 def test_ready():
     res = client.get("/ready")
     assert res.status_code == 200

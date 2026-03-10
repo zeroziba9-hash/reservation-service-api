@@ -20,6 +20,7 @@ Production-minded reservation API template with auth, RBAC, and safe booking flo
 - 표준 에러 응답 포맷 (standardized error body)
 - Alembic migration baseline
 - 구조화 로그(JSON) + Request ID (`X-Request-ID`) 추적
+- 성공 응답 래퍼(1차): `X-Response-Envelope: true` (health/ready/auth)
 - Ruff + Black + Pytest + GitHub Actions CI
 
 ---
@@ -88,7 +89,7 @@ python -m pytest -q
 ```
 
 Expected result:
-- `10 passed`
+- `11 passed`
 
 ---
 

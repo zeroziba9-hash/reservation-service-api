@@ -1,6 +1,15 @@
 from datetime import datetime
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+T = TypeVar("T")
+
+
+class ApiResponse(BaseModel, Generic[T]):
+    success: bool = True
+    data: T
+    request_id: str | None = None
 
 
 class SignupRequest(BaseModel):
@@ -41,6 +50,19 @@ class ResourceOut(BaseModel):
     name: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DeleteOut(BaseModel):
+    deleted: bool
+
+
+class HealthOut(BaseModel):
+    status: str
+
+
+class ReadyOut(BaseModel):
+    status: str
+    db: str
 
 
 class ReservationCreate(BaseModel):

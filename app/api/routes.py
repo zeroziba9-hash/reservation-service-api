@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from redis import Redis
 from redis.exceptions import RedisError
@@ -77,19 +77,41 @@ def build_reservation_request_hash(resource_id: int, start_at: datetime, end_at:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def success_response(request: Request, data, envelope: bool):
+    if not envelope:
+        return data
+    return {
+        "success": True,
+        "data": data,
+        "request_id": getattr(request.state, "request_id", None),
+    }
+
+
 @router.get("/health")
-def health():
-    return {"status": "ok"}
+def health(
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
+):
+    return success_response(request, {"status": "ok"}, envelope)
 
 
 @router.get("/ready")
-def ready(db: Session = Depends(get_db)):
+def ready(
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
+    db: Session = Depends(get_db),
+):
     db.execute(text("SELECT 1"))
-    return {"status": "ready", "db": "ok"}
+    return success_response(request, {"status": "ready", "db": "ok"}, envelope)
 
 
-@router.post("/auth/signup", response_model=UserOut)
-def signup(payload: SignupRequest, db: Session = Depends(get_db)):
+@router.post("/auth/signup", response_model=UserOut | dict)
+def signup(
+    payload: SignupRequest,
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
+    db: Session = Depends(get_db),
+):
     exists = db.query(User).filter(User.email == payload.email).first()
     if exists:
         raise HTTPException(status_code=409, detail="email already exists")
@@ -106,17 +128,22 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     write_audit(db, user.id, "auth.signup", f"user:{user.id}", f"role={user.role}")
     db.commit()
     db.refresh(user)
-    return user
+    return success_response(request, user, envelope)
 
 
-@router.post("/auth/login", response_model=TokenOut)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@router.post("/auth/login", response_model=TokenOut | dict)
+def login(
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid credentials")
 
     token = create_access_token(user.email)
-    return TokenOut(access_token=token)
+    return success_response(request, TokenOut(access_token=token), envelope)
 
 
 @router.post("/resources", response_model=ResourceOut)
