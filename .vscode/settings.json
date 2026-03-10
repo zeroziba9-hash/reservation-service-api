@@ -1,0 +1,15 @@
+{
+  "files.exclude": {
+    "**/.pytest_cache": true,
+    "**/__pycache__": true,
+    "**/.venv": true,
+    "**/.venv-1": true,
+    "app.db": true
+  },
+  "search.exclude": {
+    "**/.pytest_cache": true,
+    "**/__pycache__": true,
+    "**/.venv": true,
+    "**/.venv-1": true
+  }
+}

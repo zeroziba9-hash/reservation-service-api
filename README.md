@@ -61,6 +61,11 @@ Windows one-command start:
 ./scripts/dev_start.ps1
 ```
 
+Windows PostgreSQL start (docker compose + migration + run):
+```powershell
+./scripts/dev_start_pg.ps1
+```
+
 Swagger Docs:
 - `http://127.0.0.1:8000/docs`
 
