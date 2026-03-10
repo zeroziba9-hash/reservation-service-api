@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, text
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import create_access_token, hash_password, verify_password
 from app.deps import get_current_user, get_db, require_admin
@@ -11,8 +11,10 @@ from app.models import AuditLog, Reservation, Resource, User
 from app.schemas import (
     ReservationCreate,
     ReservationOut,
+    ReservationUpdate,
     ResourceCreate,
     ResourceOut,
+    ResourceUpdate,
     SignupRequest,
     TokenOut,
     UserOut,
@@ -25,9 +27,40 @@ def write_audit(db: Session, actor_user_id: int | None, action: str, target: str
     db.add(AuditLog(actor_user_id=actor_user_id, action=action, target=target, detail=detail))
 
 
+def to_utc_naive(value: datetime, field_name: str) -> datetime:
+    if value.tzinfo is None:
+        raise HTTPException(status_code=400, detail=f"{field_name} must include timezone (UTC recommended)")
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def find_overlap(
+    db: Session,
+    *,
+    resource_id: int,
+    start_at: datetime,
+    end_at: datetime,
+    exclude_reservation_id: int | None = None,
+):
+    q = db.query(Reservation).filter(
+        and_(
+            Reservation.resource_id == resource_id,
+            Reservation.status == "BOOKED",
+            or_(
+                and_(Reservation.start_at <= start_at, Reservation.end_at > start_at),
+                and_(Reservation.start_at < end_at, Reservation.end_at >= end_at),
+                and_(Reservation.start_at >= start_at, Reservation.end_at <= end_at),
+            ),
+        )
+    )
+    if exclude_reservation_id is not None:
+        q = q.filter(Reservation.id != exclude_reservation_id)
+    return q.first()
+
+
 @router.get('/health')
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    return {"status": "ok", "db": "ok"}
 
 
 @router.post('/auth/signup', response_model=UserOut)
@@ -67,6 +100,10 @@ def create_resource(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    duplicated = db.query(Resource).filter(Resource.name == payload.name).first()
+    if duplicated:
+        raise HTTPException(status_code=409, detail="resource name already exists")
+
     resource = Resource(name=payload.name)
     db.add(resource)
     db.flush()
@@ -76,39 +113,82 @@ def create_resource(
     return resource
 
 
+@router.get('/resources', response_model=list[ResourceOut])
+def list_resources(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    return db.query(Resource).order_by(Resource.id.asc()).all()
+
+
+@router.patch('/resources/{resource_id}', response_model=ResourceOut)
+def update_resource(
+    resource_id: int,
+    payload: ResourceUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    resource = db.get(Resource, resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="resource not found")
+
+    duplicated = db.query(Resource).filter(Resource.name == payload.name, Resource.id != resource_id).first()
+    if duplicated:
+        raise HTTPException(status_code=409, detail="resource name already exists")
+
+    old_name = resource.name
+    resource.name = payload.name
+    write_audit(db, admin.id, "resource.update", f"resource:{resource.id}", f"{old_name} -> {resource.name}")
+    db.commit()
+    db.refresh(resource)
+    return resource
+
+
+@router.delete('/resources/{resource_id}')
+def delete_resource(
+    resource_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    resource = db.get(Resource, resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="resource not found")
+
+    has_future_booked = db.query(Reservation).filter(
+        Reservation.resource_id == resource_id,
+        Reservation.status == "BOOKED",
+    ).first()
+    if has_future_booked:
+        raise HTTPException(status_code=409, detail="resource has active reservations")
+
+    write_audit(db, admin.id, "resource.delete", f"resource:{resource.id}", resource.name)
+    db.delete(resource)
+    db.commit()
+    return {"deleted": True}
+
+
 @router.post('/reservations', response_model=ReservationOut)
 def create_reservation(
     payload: ReservationCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if payload.start_at >= payload.end_at:
+    start_at = to_utc_naive(payload.start_at, "start_at")
+    end_at = to_utc_naive(payload.end_at, "end_at")
+
+    if start_at >= end_at:
         raise HTTPException(status_code=400, detail="start_at must be before end_at")
 
-    resource = db.get(Resource, payload.resource_id)
+    resource = db.query(Resource).filter(Resource.id == payload.resource_id).with_for_update().first()
     if not resource:
         raise HTTPException(status_code=404, detail="resource not found")
 
-    overlap = db.query(Reservation).filter(
-        and_(
-            Reservation.resource_id == payload.resource_id,
-            Reservation.status == "BOOKED",
-            or_(
-                and_(Reservation.start_at <= payload.start_at, Reservation.end_at > payload.start_at),
-                and_(Reservation.start_at < payload.end_at, Reservation.end_at >= payload.end_at),
-                and_(Reservation.start_at >= payload.start_at, Reservation.end_at <= payload.end_at),
-            ),
-        )
-    ).first()
-
+    overlap = find_overlap(db, resource_id=payload.resource_id, start_at=start_at, end_at=end_at)
     if overlap:
         raise HTTPException(status_code=409, detail="time slot already booked")
 
     row = Reservation(
         user_id=user.id,
         resource_id=payload.resource_id,
-        start_at=payload.start_at,
-        end_at=payload.end_at,
+        start_at=start_at,
+        end_at=end_at,
         status="BOOKED",
     )
     db.add(row)
@@ -121,8 +201,59 @@ def create_reservation(
         f"resource_id={row.resource_id}, {row.start_at.isoformat()}~{row.end_at.isoformat()}",
     )
     db.commit()
-    db.refresh(row)
-    return row
+
+    return (
+        db.query(Reservation)
+        .options(joinedload(Reservation.resource), joinedload(Reservation.user))
+        .filter(Reservation.id == row.id)
+        .first()
+    )
+
+
+@router.patch('/reservations/{reservation_id}', response_model=ReservationOut)
+def update_reservation(
+    reservation_id: int,
+    payload: ReservationUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    row = db.get(Reservation, reservation_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="reservation not found")
+
+    if user.role != "ADMIN" and row.user_id != user.id:
+        raise HTTPException(status_code=403, detail="no permission")
+
+    if row.status != "BOOKED":
+        raise HTTPException(status_code=409, detail="only BOOKED reservation can be updated")
+
+    start_at = to_utc_naive(payload.start_at, "start_at")
+    end_at = to_utc_naive(payload.end_at, "end_at")
+    if start_at >= end_at:
+        raise HTTPException(status_code=400, detail="start_at must be before end_at")
+
+    db.query(Resource).filter(Resource.id == row.resource_id).with_for_update().first()
+    overlap = find_overlap(
+        db,
+        resource_id=row.resource_id,
+        start_at=start_at,
+        end_at=end_at,
+        exclude_reservation_id=row.id,
+    )
+    if overlap:
+        raise HTTPException(status_code=409, detail="time slot already booked")
+
+    row.start_at = start_at
+    row.end_at = end_at
+    write_audit(db, user.id, "reservation.update", f"reservation:{row.id}", f"{start_at.isoformat()}~{end_at.isoformat()}")
+    db.commit()
+
+    return (
+        db.query(Reservation)
+        .options(joinedload(Reservation.resource), joinedload(Reservation.user))
+        .filter(Reservation.id == row.id)
+        .first()
+    )
 
 
 @router.get('/reservations', response_model=list[ReservationOut])
@@ -134,17 +265,20 @@ def list_reservations(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    q = db.query(Reservation)
+    q = db.query(Reservation).options(joinedload(Reservation.resource), joinedload(Reservation.user))
+    if user.role != "ADMIN":
+        q = q.filter(Reservation.user_id == user.id)
+
     if status:
         q = q.filter(Reservation.status == status)
     if resource_id:
         q = q.filter(Reservation.resource_id == resource_id)
     if from_at:
-        q = q.filter(Reservation.end_at >= from_at)
+        q = q.filter(Reservation.end_at >= to_utc_naive(from_at, "from_at"))
     if to_at:
-        q = q.filter(Reservation.start_at <= to_at)
+        q = q.filter(Reservation.start_at <= to_utc_naive(to_at, "to_at"))
     return q.order_by(Reservation.start_at.asc()).offset(offset).limit(limit).all()
 
 
@@ -161,8 +295,21 @@ def cancel_reservation(
     if user.role != "ADMIN" and row.user_id != user.id:
         raise HTTPException(status_code=403, detail="no permission")
 
+    if row.status == "CANCELED":
+        return (
+            db.query(Reservation)
+            .options(joinedload(Reservation.resource), joinedload(Reservation.user))
+            .filter(Reservation.id == row.id)
+            .first()
+        )
+
     row.status = "CANCELED"
     write_audit(db, user.id, "reservation.cancel", f"reservation:{row.id}", "status=CANCELED")
     db.commit()
-    db.refresh(row)
-    return row
+
+    return (
+        db.query(Reservation)
+        .options(joinedload(Reservation.resource), joinedload(Reservation.user))
+        .filter(Reservation.id == row.id)
+        .first()
+    )

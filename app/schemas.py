@@ -31,6 +31,10 @@ class ResourceCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
 
 
+class ResourceUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+
+
 class ResourceOut(BaseModel):
     id: int
     name: str
@@ -44,6 +48,11 @@ class ReservationCreate(BaseModel):
     end_at: datetime
 
 
+class ReservationUpdate(BaseModel):
+    start_at: datetime
+    end_at: datetime
+
+
 class ReservationOut(BaseModel):
     id: int
     user_id: int
@@ -51,5 +60,7 @@ class ReservationOut(BaseModel):
     start_at: datetime
     end_at: datetime
     status: str
+    resource_name: str | None = None
+    user_email: EmailStr | None = None
 
     model_config = ConfigDict(from_attributes=True)

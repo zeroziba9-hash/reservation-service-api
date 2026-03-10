@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -14,6 +14,10 @@ def signup_and_token(email: str, name: str, password: str):
     return {"Authorization": f"Bearer {token}"}
 
 
+def dt(hour: int):
+    return datetime(2026, 3, 10, hour, 0, 0, tzinfo=timezone.utc).isoformat()
+
+
 def test_admin_can_create_resource_and_overlap_reservation_blocked():
     admin_headers = signup_and_token("admin@test.com", "admin", "pass1234")
 
@@ -23,43 +27,34 @@ def test_admin_can_create_resource_and_overlap_reservation_blocked():
 
     user_headers = signup_and_token("alice@test.com", "alice", "pass1234")
 
-    start = datetime(2026, 3, 10, 10, 0, 0)
-    end = start + timedelta(hours=2)
-
     ok = client.post('/reservations', json={
         'resource_id': resource_id,
-        'start_at': start.isoformat(),
-        'end_at': end.isoformat(),
+        'start_at': dt(10),
+        'end_at': dt(12),
     }, headers=user_headers)
     assert ok.status_code == 200
 
     overlap = client.post('/reservations', json={
         'resource_id': resource_id,
-        'start_at': (start + timedelta(minutes=30)).isoformat(),
-        'end_at': (end + timedelta(minutes=30)).isoformat(),
+        'start_at': datetime(2026, 3, 10, 11, 0, 0, tzinfo=timezone.utc).isoformat(),
+        'end_at': datetime(2026, 3, 10, 13, 0, 0, tzinfo=timezone.utc).isoformat(),
     }, headers=user_headers)
     assert overlap.status_code == 409
     assert overlap.json()["code"] == "HTTP_ERROR"
 
-    booked_only = client.get('/reservations?status=BOOKED', headers=user_headers)
-    assert booked_only.status_code == 200
-    assert len(booked_only.json()) == 1
 
 
-def test_owner_can_cancel_reservation():
+def test_owner_can_cancel_reservation_idempotent():
     admin_headers = signup_and_token("admin2@test.com", "admin2", "pass1234")
     r = client.post('/resources', json={'name': 'room-b'}, headers=admin_headers)
     assert r.status_code == 200
 
     user_headers = signup_and_token("bob@test.com", "bob", "pass1234")
 
-    start = datetime(2026, 3, 10, 13, 0, 0)
-    end = start + timedelta(hours=1)
-
     created = client.post('/reservations', json={
         'resource_id': r.json()['id'],
-        'start_at': start.isoformat(),
-        'end_at': end.isoformat(),
+        'start_at': dt(13),
+        'end_at': dt(14),
     }, headers=user_headers)
     assert created.status_code == 200
 
@@ -68,15 +63,21 @@ def test_owner_can_cancel_reservation():
     assert canceled.status_code == 200
     assert canceled.json()['status'] == 'CANCELED'
 
+    canceled_again = client.post(f"/reservations/{reservation_id}/cancel", headers=user_headers)
+    assert canceled_again.status_code == 200
+    assert canceled_again.json()['status'] == 'CANCELED'
 
-def test_list_reservations_supports_pagination_and_status_validation():
+
+
+def test_list_reservations_supports_pagination_status_and_scope():
     admin_headers = signup_and_token("admin3@test.com", "admin3", "pass1234")
     r = client.post('/resources', json={'name': 'room-c'}, headers=admin_headers)
     assert r.status_code == 200
 
     user_headers = signup_and_token("charlie@test.com", "charlie", "pass1234")
+    other_headers = signup_and_token("dave@test.com", "dave", "pass1234")
 
-    base = datetime(2026, 3, 11, 9, 0, 0)
+    base = datetime(2026, 3, 11, 9, 0, 0, tzinfo=timezone.utc)
     for i in range(3):
         created = client.post('/reservations', json={
             'resource_id': r.json()['id'],
@@ -85,6 +86,13 @@ def test_list_reservations_supports_pagination_and_status_validation():
         }, headers=user_headers)
         assert created.status_code == 200
 
+    other_created = client.post('/reservations', json={
+        'resource_id': r.json()['id'],
+        'start_at': datetime(2026, 3, 12, 1, 0, 0, tzinfo=timezone.utc).isoformat(),
+        'end_at': datetime(2026, 3, 12, 2, 0, 0, tzinfo=timezone.utc).isoformat(),
+    }, headers=other_headers)
+    assert other_created.status_code == 200
+
     page = client.get('/reservations?limit=2&offset=1&status=BOOKED', headers=user_headers)
     assert page.status_code == 200
     assert len(page.json()) == 2
@@ -92,3 +100,62 @@ def test_list_reservations_supports_pagination_and_status_validation():
     bad_status = client.get('/reservations?status=PENDING', headers=user_headers)
     assert bad_status.status_code == 422
     assert bad_status.json()['code'] == 'VALIDATION_ERROR'
+
+    scoped = client.get('/reservations', headers=user_headers)
+    assert scoped.status_code == 200
+    assert len(scoped.json()) == 3
+
+    admin_all = client.get('/reservations', headers=admin_headers)
+    assert admin_all.status_code == 200
+    assert len(admin_all.json()) == 4
+
+
+
+def test_timezone_required_and_resource_crud():
+    admin_headers = signup_and_token("admin4@test.com", "admin4", "pass1234")
+
+    created = client.post('/resources', json={'name': 'room-d'}, headers=admin_headers)
+    assert created.status_code == 200
+    resource_id = created.json()['id']
+
+    listed = client.get('/resources', headers=admin_headers)
+    assert listed.status_code == 200
+    assert any(x['name'] == 'room-d' for x in listed.json())
+
+    patched = client.patch(f'/resources/{resource_id}', json={'name': 'room-d-1'}, headers=admin_headers)
+    assert patched.status_code == 200
+    assert patched.json()['name'] == 'room-d-1'
+
+    user_headers = signup_and_token("eve@test.com", "eve", "pass1234")
+    naive_reservation = client.post('/reservations', json={
+        'resource_id': resource_id,
+        'start_at': '2026-03-10T10:00:00',
+        'end_at': '2026-03-10T11:00:00',
+    }, headers=user_headers)
+    assert naive_reservation.status_code == 400
+
+    deleted = client.delete(f'/resources/{resource_id}', headers=admin_headers)
+    assert deleted.status_code == 200
+    assert deleted.json()['deleted'] is True
+
+
+def test_reservation_update():
+    admin_headers = signup_and_token("admin5@test.com", "admin5", "pass1234")
+    r = client.post('/resources', json={'name': 'room-e'}, headers=admin_headers)
+    assert r.status_code == 200
+
+    user_headers = signup_and_token("frank@test.com", "frank", "pass1234")
+    created = client.post('/reservations', json={
+        'resource_id': r.json()['id'],
+        'start_at': dt(15),
+        'end_at': dt(16),
+    }, headers=user_headers)
+    assert created.status_code == 200
+
+    reservation_id = created.json()['id']
+    updated = client.patch(f'/reservations/{reservation_id}', json={
+        'start_at': dt(16),
+        'end_at': dt(17),
+    }, headers=user_headers)
+    assert updated.status_code == 200
+    assert updated.json()['start_at'].startswith('2026-03-10T16:00:00')

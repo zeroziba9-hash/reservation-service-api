@@ -39,6 +39,14 @@ class Reservation(Base):
     user = relationship("User")
     resource = relationship("Resource")
 
+    @property
+    def resource_name(self) -> str | None:
+        return self.resource.name if self.resource else None
+
+    @property
+    def user_email(self) -> str | None:
+        return self.user.email if self.user else None
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
