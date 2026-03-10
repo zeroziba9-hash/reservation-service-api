@@ -1,0 +1,18 @@
+{
+  "request": {
+    "user_call": {
+      "method": "GET",
+      "path": "/reservations",
+      "auth": "Bearer <user_token>"
+    },
+    "admin_call": {
+      "method": "GET",
+      "path": "/reservations",
+      "auth": "Bearer <admin_token>"
+    }
+  },
+  "expected": {
+    "user_scope": "only own reservations",
+    "admin_scope": "all reservations"
+  }
+}

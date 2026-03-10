@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PATCH",
+    "path": "/resources/1",
+    "auth": "Bearer <admin_token>",
+    "json": {
+      "name": "room-a-renamed"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "id": 1,
+      "name": "room-a-renamed"
+    }
+  }
+}

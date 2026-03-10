@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/resources",
+    "auth": "Bearer <access_token>"
+  },
+  "expected": {
+    "status": 200,
+    "body": [
+      {
+        "id": 1,
+        "name": "room-a"
+      }
+    ]
+  }
+}

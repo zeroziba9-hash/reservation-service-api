@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/resources/2",
+    "auth": "Bearer <admin_token>"
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "deleted": true
+    }
+  }
+}
