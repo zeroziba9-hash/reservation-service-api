@@ -1,9 +1,0 @@
-{
-  "status": 200,
-  "body": {
-    "id": 3,
-    "email": "admin_demo01@test.com",
-    "name": "admin",
-    "role": "USER"
-  }
-}
