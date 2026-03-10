@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import and_, or_
@@ -126,10 +127,12 @@ def create_reservation(
 
 @router.get('/reservations', response_model=list[ReservationOut])
 def list_reservations(
-    status: str | None = Query(default=None, description="BOOKED or CANCELED"),
+    status: Literal["BOOKED", "CANCELED"] | None = Query(default=None, description="BOOKED or CANCELED"),
     resource_id: int | None = Query(default=None),
     from_at: datetime | None = Query(default=None),
     to_at: datetime | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -142,7 +145,7 @@ def list_reservations(
         q = q.filter(Reservation.end_at >= from_at)
     if to_at:
         q = q.filter(Reservation.start_at <= to_at)
-    return q.order_by(Reservation.start_at.asc()).all()
+    return q.order_by(Reservation.start_at.asc()).offset(offset).limit(limit).all()
 
 
 @router.post('/reservations/{reservation_id}/cancel', response_model=ReservationOut)

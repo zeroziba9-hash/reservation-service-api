@@ -11,7 +11,7 @@ Production-minded reservation API template with auth, RBAC, and safe booking flo
 - Role 기반 권한 제어 (첫 가입자 ADMIN)
 - 예약 중복 방지 (409 Conflict)
 - 예약 취소 (owner/admin)
-- 예약 조회 필터 (`status`, `resource_id`, `from_at`, `to_at`)
+- 예약 조회 필터 + 페이지네이션 (`status`, `resource_id`, `from_at`, `to_at`, `limit`, `offset`)
 - Audit log 기록 (signup/resource create/reservation create/cancel)
 - 표준 에러 응답 포맷 (standardized error body)
 - Alembic migration baseline

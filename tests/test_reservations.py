@@ -67,3 +67,28 @@ def test_owner_can_cancel_reservation():
     canceled = client.post(f"/reservations/{reservation_id}/cancel", headers=user_headers)
     assert canceled.status_code == 200
     assert canceled.json()['status'] == 'CANCELED'
+
+
+def test_list_reservations_supports_pagination_and_status_validation():
+    admin_headers = signup_and_token("admin3@test.com", "admin3", "pass1234")
+    r = client.post('/resources', json={'name': 'room-c'}, headers=admin_headers)
+    assert r.status_code == 200
+
+    user_headers = signup_and_token("charlie@test.com", "charlie", "pass1234")
+
+    base = datetime(2026, 3, 11, 9, 0, 0)
+    for i in range(3):
+        created = client.post('/reservations', json={
+            'resource_id': r.json()['id'],
+            'start_at': (base + timedelta(hours=i * 2)).isoformat(),
+            'end_at': (base + timedelta(hours=i * 2 + 1)).isoformat(),
+        }, headers=user_headers)
+        assert created.status_code == 200
+
+    page = client.get('/reservations?limit=2&offset=1&status=BOOKED', headers=user_headers)
+    assert page.status_code == 200
+    assert len(page.json()) == 2
+
+    bad_status = client.get('/reservations?status=PENDING', headers=user_headers)
+    assert bad_status.status_code == 422
+    assert bad_status.json()['code'] == 'VALIDATION_ERROR'
