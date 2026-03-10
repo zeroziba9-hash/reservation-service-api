@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.security import OAuth2PasswordRequestForm
 from redis import Redis
 from redis.exceptions import RedisError
@@ -82,7 +83,7 @@ def success_response(request: Request, data, envelope: bool):
         return data
     return {
         "success": True,
-        "data": data,
+        "data": jsonable_encoder(data),
         "request_id": getattr(request.state, "request_id", None),
     }
 
@@ -146,9 +147,11 @@ def login(
     return success_response(request, TokenOut(access_token=token), envelope)
 
 
-@router.post("/resources", response_model=ResourceOut)
+@router.post("/resources", response_model=ResourceOut | dict)
 def create_resource(
     payload: ResourceCreate,
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -162,18 +165,26 @@ def create_resource(
     write_audit(db, admin.id, "resource.create", f"resource:{resource.id}", payload.name)
     db.commit()
     db.refresh(resource)
-    return resource
+    return success_response(request, resource, envelope)
 
 
-@router.get("/resources", response_model=list[ResourceOut])
-def list_resources(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
-    return db.query(Resource).order_by(Resource.id.asc()).all()
+@router.get("/resources", response_model=list[ResourceOut] | dict)
+def list_resources(
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    resources = db.query(Resource).order_by(Resource.id.asc()).all()
+    return success_response(request, resources, envelope)
 
 
-@router.patch("/resources/{resource_id}", response_model=ResourceOut)
+@router.patch("/resources/{resource_id}", response_model=ResourceOut | dict)
 def update_resource(
     resource_id: int,
     payload: ResourceUpdate,
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -194,12 +205,14 @@ def update_resource(
     )
     db.commit()
     db.refresh(resource)
-    return resource
+    return success_response(request, resource, envelope)
 
 
 @router.delete("/resources/{resource_id}")
 def delete_resource(
     resource_id: int,
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -221,12 +234,14 @@ def delete_resource(
     write_audit(db, admin.id, "resource.delete", f"resource:{resource.id}", resource.name)
     db.delete(resource)
     db.commit()
-    return {"deleted": True}
+    return success_response(request, {"deleted": True}, envelope)
 
 
-@router.post("/reservations", response_model=ReservationOut)
+@router.post("/reservations", response_model=ReservationOut | dict)
 def create_reservation(
     payload: ReservationCreate,
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -269,7 +284,7 @@ def create_reservation(
                 .first()
             )
             if existing_row:
-                return existing_row
+                return success_response(request, existing_row, envelope)
 
         lock_acquired = redis.set(
             redis_lock_key, request_hash, nx=True, ex=settings.idempotency_lock_seconds
@@ -291,7 +306,7 @@ def create_reservation(
                     .first()
                 )
                 if existing_row:
-                    return existing_row
+                    return success_response(request, existing_row, envelope)
 
             raise HTTPException(
                 status_code=409, detail="request with same idempotency key is in progress"
@@ -339,12 +354,13 @@ def create_reservation(
             except RedisError:
                 pass
 
-        return (
+        created_row = (
             db.query(Reservation)
             .options(joinedload(Reservation.resource), joinedload(Reservation.user))
             .filter(Reservation.id == row.id)
             .first()
         )
+        return success_response(request, created_row, envelope)
     finally:
         if redis_lock_key:
             try:
@@ -353,10 +369,12 @@ def create_reservation(
                 pass
 
 
-@router.patch("/reservations/{reservation_id}", response_model=ReservationOut)
+@router.patch("/reservations/{reservation_id}", response_model=ReservationOut | dict)
 def update_reservation(
     reservation_id: int,
     payload: ReservationUpdate,
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -397,16 +415,19 @@ def update_reservation(
     )
     db.commit()
 
-    return (
+    updated_row = (
         db.query(Reservation)
         .options(joinedload(Reservation.resource), joinedload(Reservation.user))
         .filter(Reservation.id == row.id)
         .first()
     )
+    return success_response(request, updated_row, envelope)
 
 
-@router.get("/reservations", response_model=list[ReservationOut])
+@router.get("/reservations", response_model=list[ReservationOut] | dict)
 def list_reservations(
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
     status: Literal["BOOKED", "CANCELED"] | None = Query(
         default=None, description="BOOKED or CANCELED"
     ),
@@ -432,12 +453,15 @@ def list_reservations(
         q = q.filter(Reservation.end_at >= to_utc_naive(from_at, "from_at"))
     if to_at:
         q = q.filter(Reservation.start_at <= to_utc_naive(to_at, "to_at"))
-    return q.order_by(Reservation.start_at.asc()).offset(offset).limit(limit).all()
+    reservations = q.order_by(Reservation.start_at.asc()).offset(offset).limit(limit).all()
+    return success_response(request, reservations, envelope)
 
 
-@router.post("/reservations/{reservation_id}/cancel", response_model=ReservationOut)
+@router.post("/reservations/{reservation_id}/cancel", response_model=ReservationOut | dict)
 def cancel_reservation(
     reservation_id: int,
+    request: Request,
+    envelope: bool = Header(default=False, alias="X-Response-Envelope"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -449,20 +473,22 @@ def cancel_reservation(
         raise HTTPException(status_code=403, detail="no permission")
 
     if row.status == "CANCELED":
-        return (
+        canceled_row = (
             db.query(Reservation)
             .options(joinedload(Reservation.resource), joinedload(Reservation.user))
             .filter(Reservation.id == row.id)
             .first()
         )
+        return success_response(request, canceled_row, envelope)
 
     row.status = "CANCELED"
     write_audit(db, user.id, "reservation.cancel", f"reservation:{row.id}", "status=CANCELED")
     db.commit()
 
-    return (
+    canceled_row = (
         db.query(Reservation)
         .options(joinedload(Reservation.resource), joinedload(Reservation.user))
         .filter(Reservation.id == row.id)
         .first()
     )
+    return success_response(request, canceled_row, envelope)

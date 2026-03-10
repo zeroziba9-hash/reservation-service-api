@@ -239,3 +239,35 @@ def test_idempotency_key_too_long_returns_400():
         headers=headers,
     )
     assert res.status_code == 400
+
+
+def test_resources_and_reservations_support_success_envelope():
+    admin_headers = signup_and_token("admin9@test.com", "admin9", "pass1234")
+    env_headers = {**admin_headers, "X-Response-Envelope": "true"}
+
+    created_resource = client.post("/resources", json={"name": "room-i"}, headers=env_headers)
+    assert created_resource.status_code == 200
+    created_body = created_resource.json()
+    assert created_body["success"] is True
+    assert created_body["data"]["name"] == "room-i"
+    assert created_body["request_id"] == created_resource.headers.get("X-Request-ID")
+
+    list_resources = client.get("/resources", headers=env_headers)
+    assert list_resources.status_code == 200
+    list_body = list_resources.json()
+    assert list_body["success"] is True
+    assert isinstance(list_body["data"], list)
+
+    created_reservation = client.post(
+        "/reservations",
+        json={
+            "resource_id": created_body["data"]["id"],
+            "start_at": dt(22),
+            "end_at": datetime(2026, 3, 10, 23, 0, 0, tzinfo=timezone.utc).isoformat(),
+        },
+        headers=env_headers,
+    )
+    assert created_reservation.status_code == 200
+    reservation_body = created_reservation.json()
+    assert reservation_body["success"] is True
+    assert reservation_body["data"]["status"] == "BOOKED"
