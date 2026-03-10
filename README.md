@@ -56,6 +56,11 @@ python -m alembic upgrade head
 python -m uvicorn app.main:app --reload
 ```
 
+Windows one-command start:
+```powershell
+./scripts/dev_start.ps1
+```
+
 Swagger Docs:
 - `http://127.0.0.1:8000/docs`
 
