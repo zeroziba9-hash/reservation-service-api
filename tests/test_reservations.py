@@ -159,3 +159,31 @@ def test_reservation_update():
     }, headers=user_headers)
     assert updated.status_code == 200
     assert updated.json()['start_at'].startswith('2026-03-10T16:00:00')
+
+
+def test_create_reservation_with_idempotency_key_returns_same_result():
+    admin_headers = signup_and_token("admin6@test.com", "admin6", "pass1234")
+    resource = client.post('/resources', json={'name': 'room-f'}, headers=admin_headers)
+    assert resource.status_code == 200
+
+    user_headers = signup_and_token("grace@test.com", "grace", "pass1234")
+    idempotent_headers = {**user_headers, "Idempotency-Key": "idem-key-001"}
+
+    payload = {
+        'resource_id': resource.json()['id'],
+        'start_at': dt(18),
+        'end_at': dt(19),
+    }
+    first = client.post('/reservations', json=payload, headers=idempotent_headers)
+    assert first.status_code == 200
+
+    second = client.post('/reservations', json=payload, headers=idempotent_headers)
+    assert second.status_code == 200
+    assert first.json()['id'] == second.json()['id']
+
+    mismatch = client.post(
+        '/reservations',
+        json={**payload, 'end_at': dt(20)},
+        headers=idempotent_headers,
+    )
+    assert mismatch.status_code == 409

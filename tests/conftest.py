@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 from app.db.base import Base
 import app.models  # noqa: F401
 from app.main import app
-from app.deps import get_db
+from app.deps import get_db, get_redis
 
 TEST_DB_FILE = Path("test_app.db")
 TEST_DB_URL = "sqlite:///./test_app.db"
@@ -32,9 +32,28 @@ def override_get_db():
         db.close()
 
 
+class FakeRedis:
+    def __init__(self):
+        self.store: dict[str, str] = {}
+
+    def get(self, key: str):
+        return self.store.get(key)
+
+    def setex(self, key: str, _seconds: int, value: str):
+        self.store[key] = value
+
+
+def override_get_redis():
+    return fake_redis
+
+
+fake_redis = FakeRedis()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_override():
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_redis] = override_get_redis
     yield
     app.dependency_overrides.clear()
     test_engine.dispose()
@@ -46,4 +65,5 @@ def setup_override():
 def reset_tables():
     Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)
+    fake_redis.store.clear()
     yield

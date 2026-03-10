@@ -1,12 +1,16 @@
 from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.security import OAuth2PasswordRequestForm
+from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import create_access_token, hash_password, verify_password
-from app.deps import get_current_user, get_db, require_admin
+from app.deps import get_current_user, get_db, get_redis, require_admin
 from app.models import AuditLog, Reservation, Resource, User
 from app.schemas import (
     ReservationCreate,
@@ -55,6 +59,18 @@ def find_overlap(
     if exclude_reservation_id is not None:
         q = q.filter(Reservation.id != exclude_reservation_id)
     return q.first()
+
+
+def build_reservation_request_hash(resource_id: int, start_at: datetime, end_at: datetime) -> str:
+    raw = json.dumps(
+        {
+            "resource_id": resource_id,
+            "start_at": start_at.isoformat(),
+            "end_at": end_at.isoformat(),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 @router.get('/health')
@@ -167,7 +183,9 @@ def delete_resource(
 @router.post('/reservations', response_model=ReservationOut)
 def create_reservation(
     payload: ReservationCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
     user: User = Depends(get_current_user),
 ):
     start_at = to_utc_naive(payload.start_at, "start_at")
@@ -175,6 +193,30 @@ def create_reservation(
 
     if start_at >= end_at:
         raise HTTPException(status_code=400, detail="start_at must be before end_at")
+
+    request_hash = build_reservation_request_hash(payload.resource_id, start_at, end_at)
+    redis_key = None
+    if idempotency_key:
+        redis_key = f"idem:reservation:create:user:{user.id}:{idempotency_key}"
+        try:
+            cached = redis.get(redis_key)
+        except RedisError as exc:
+            raise HTTPException(status_code=503, detail=f"idempotency store unavailable: {exc}")
+
+        if cached:
+            cached_data = json.loads(cached)
+            if cached_data.get("request_hash") != request_hash:
+                raise HTTPException(status_code=409, detail="idempotency key already used with different payload")
+
+            cached_id = int(cached_data["reservation_id"])
+            existing_row = (
+                db.query(Reservation)
+                .options(joinedload(Reservation.resource), joinedload(Reservation.user))
+                .filter(Reservation.id == cached_id)
+                .first()
+            )
+            if existing_row:
+                return existing_row
 
     resource = db.query(Resource).filter(Resource.id == payload.resource_id).with_for_update().first()
     if not resource:
@@ -201,6 +243,16 @@ def create_reservation(
         f"resource_id={row.resource_id}, {row.start_at.isoformat()}~{row.end_at.isoformat()}",
     )
     db.commit()
+
+    if redis_key:
+        try:
+            redis.setex(
+                redis_key,
+                60 * 60 * 24,
+                json.dumps({"reservation_id": row.id, "request_hash": request_hash}),
+            )
+        except RedisError:
+            pass
 
     return (
         db.query(Reservation)

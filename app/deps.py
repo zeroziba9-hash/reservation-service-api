@@ -1,7 +1,9 @@
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from redis import Redis
 
+from app.core.config import settings
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
 from app.models import User
@@ -32,3 +34,7 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != "ADMIN":
         raise HTTPException(status_code=403, detail="admin only")
     return user
+
+
+def get_redis() -> Redis:
+    return Redis.from_url(settings.redis_url, decode_responses=True)
