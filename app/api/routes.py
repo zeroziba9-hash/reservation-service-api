@@ -220,11 +220,13 @@ def delete_resource(
     if not resource:
         raise HTTPException(status_code=404, detail="resource not found")
 
+    now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
     has_future_booked = (
         db.query(Reservation)
         .filter(
             Reservation.resource_id == resource_id,
             Reservation.status == "BOOKED",
+            Reservation.end_at > now_utc_naive,
         )
         .first()
     )
@@ -449,10 +451,16 @@ def list_reservations(
         q = q.filter(Reservation.status == status)
     if resource_id:
         q = q.filter(Reservation.resource_id == resource_id)
-    if from_at:
-        q = q.filter(Reservation.end_at >= to_utc_naive(from_at, "from_at"))
-    if to_at:
-        q = q.filter(Reservation.start_at <= to_utc_naive(to_at, "to_at"))
+    normalized_from_at = to_utc_naive(from_at, "from_at") if from_at else None
+    normalized_to_at = to_utc_naive(to_at, "to_at") if to_at else None
+
+    if normalized_from_at and normalized_to_at and normalized_from_at > normalized_to_at:
+        raise HTTPException(status_code=400, detail="from_at must be before or equal to to_at")
+
+    if normalized_from_at:
+        q = q.filter(Reservation.end_at >= normalized_from_at)
+    if normalized_to_at:
+        q = q.filter(Reservation.start_at <= normalized_to_at)
     reservations = q.order_by(Reservation.start_at.asc()).offset(offset).limit(limit).all()
     return success_response(request, reservations, envelope)
 

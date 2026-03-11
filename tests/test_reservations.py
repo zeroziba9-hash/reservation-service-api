@@ -164,6 +164,59 @@ def test_timezone_required_and_resource_crud():
     assert deleted.json()["deleted"] is True
 
 
+def test_delete_resource_allows_only_when_no_active_reservations():
+    admin_headers = signup_and_token("admin10@test.com", "admin10", "pass1234")
+    resource = client.post("/resources", json={"name": "room-j"}, headers=admin_headers)
+    assert resource.status_code == 200
+    resource_id = resource.json()["id"]
+
+    user_headers = signup_and_token("ian@test.com", "ian", "pass1234")
+
+    past_reservation = client.post(
+        "/reservations",
+        json={
+            "resource_id": resource_id,
+            "start_at": datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc).isoformat(),
+            "end_at": datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc).isoformat(),
+        },
+        headers=user_headers,
+    )
+    assert past_reservation.status_code == 200
+
+    delete_with_only_past = client.delete(f"/resources/{resource_id}", headers=admin_headers)
+    assert delete_with_only_past.status_code == 200
+
+    resource2 = client.post("/resources", json={"name": "room-k"}, headers=admin_headers)
+    assert resource2.status_code == 200
+    resource2_id = resource2.json()["id"]
+
+    future_reservation = client.post(
+        "/reservations",
+        json={
+            "resource_id": resource2_id,
+            "start_at": datetime(2099, 1, 1, 9, 0, 0, tzinfo=timezone.utc).isoformat(),
+            "end_at": datetime(2099, 1, 1, 10, 0, 0, tzinfo=timezone.utc).isoformat(),
+        },
+        headers=user_headers,
+    )
+    assert future_reservation.status_code == 200
+
+    delete_with_active = client.delete(f"/resources/{resource2_id}", headers=admin_headers)
+    assert delete_with_active.status_code == 409
+
+
+def test_list_reservations_invalid_time_range_returns_400():
+    admin_headers = signup_and_token("admin11@test.com", "admin11", "pass1234")
+    resource = client.post("/resources", json={"name": "room-l"}, headers=admin_headers)
+    assert resource.status_code == 200
+
+    invalid_range = client.get(
+        "/reservations?from_at=2026-03-12T12:00:00Z&to_at=2026-03-11T12:00:00Z",
+        headers=admin_headers,
+    )
+    assert invalid_range.status_code == 400
+
+
 def test_reservation_update():
     admin_headers = signup_and_token("admin5@test.com", "admin5", "pass1234")
     r = client.post("/resources", json={"name": "room-e"}, headers=admin_headers)
