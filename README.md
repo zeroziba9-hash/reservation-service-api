@@ -212,6 +212,145 @@ if normalized_from_at and normalized_to_at and normalized_from_at > normalized_t
 
 ---
 
+## 🧪 API 사용 예시 (쉽게 따라하기)
+
+기본 URL:
+
+```bash
+BASE=http://127.0.0.1:8000
+```
+
+### 1) 회원가입
+
+```bash
+curl -X POST "$BASE/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@example.com",
+    "name": "admin",
+    "password": "pass1234"
+  }'
+```
+
+예상 응답:
+
+```json
+{
+  "id": 1,
+  "email": "admin@example.com",
+  "name": "admin",
+  "role": "ADMIN"
+}
+```
+
+### 2) 로그인 (토큰 발급)
+
+```bash
+curl -X POST "$BASE/auth/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin@example.com&password=pass1234"
+```
+
+예상 응답:
+
+```json
+{
+  "access_token": "<JWT>",
+  "token_type": "bearer"
+}
+```
+
+토큰 변수 저장:
+
+```bash
+TOKEN="<JWT>"
+```
+
+### 3) 리소스 생성 (ADMIN)
+
+```bash
+curl -X POST "$BASE/resources" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"room-a"}'
+```
+
+예상 응답:
+
+```json
+{
+  "id": 1,
+  "name": "room-a"
+}
+```
+
+### 4) 예약 생성 (Idempotency-Key 포함)
+
+```bash
+curl -X POST "$BASE/reservations" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: resv-001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resource_id": 1,
+    "start_at": "2026-03-20T10:00:00Z",
+    "end_at": "2026-03-20T11:00:00Z"
+  }'
+```
+
+예상 응답:
+
+```json
+{
+  "id": 1,
+  "user_id": 1,
+  "resource_id": 1,
+  "start_at": "2026-03-20T10:00:00",
+  "end_at": "2026-03-20T11:00:00",
+  "status": "BOOKED",
+  "resource_name": "room-a",
+  "user_email": "admin@example.com"
+}
+```
+
+### 5) 예약 조회 (필터 + 페이지네이션)
+
+```bash
+curl "$BASE/reservations?status=BOOKED&resource_id=1&limit=10&offset=0" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 6) 예약 취소
+
+```bash
+curl -X POST "$BASE/reservations/1/cancel" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 7) 성공 응답 Envelope 사용
+
+```bash
+curl "$BASE/resources" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Response-Envelope: true"
+```
+
+예상 응답:
+
+```json
+{
+  "success": true,
+  "data": [
+    {"id": 1, "name": "room-a"}
+  ],
+  "request_id": "..."
+}
+```
+
+> 팁: `start_at`, `end_at`, `from_at`, `to_at`는 반드시 timezone 포함 ISO8601(`Z` 권장)으로 보내세요.
+
+---
+
 ## 🧯 Standard Error Response
 
 ```json
