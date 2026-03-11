@@ -1,34 +1,37 @@
 # reservation-service-api
 
-실무 지향 FastAPI 예약 서비스 템플릿입니다.  
-Production-minded reservation API template with auth, RBAC, and safe booking flow.
+실무 지향 **FastAPI 예약 서비스 템플릿**입니다.  
+Production-minded reservation API template with auth, RBAC, safe booking flow, and predictable API behavior.
 
 ---
 
-## 1) 핵심 기능 (Included Features)
+## ✅ Features
+
 - Health/Readiness endpoint (`GET /health`, `GET /ready` with DB ping)
-- JWT 인증 (signup/login)
-- Role 기반 권한 제어 (첫 가입자 ADMIN)
-- 리소스 CRUD (admin only)
-- 예약 중복 방지 (409 Conflict, PostgreSQL은 EXCLUDE 제약으로 DB 레벨 보호)
-- 예약 생성 Idempotency-Key 지원 (Redis 기반 중복 요청 방지)
-- 예약 수정 / 취소 (owner/admin)
-- 예약 조회 필터 + 페이지네이션 (`status`, `resource_id`, `from_at`, `to_at`, `limit`, `offset`)
-- 예약 조회 권한 분리 (USER=본인, ADMIN=전체)
-- 예약 취소 멱등 처리 (이미 취소된 건 재요청 시 200)
-- Audit log 기록 (signup/resource/reservation)
-- 표준 에러 응답 포맷 (standardized error body)
-- Alembic migration baseline
+- JWT 인증 (`/auth/signup`, `/auth/login`)
+- Role 기반 권한 제어 (최초 가입자 `ADMIN`)
+- 리소스 CRUD (`ADMIN` 전용)
+- 예약 생성/수정/취소 + 권한 분리 (`USER=본인`, `ADMIN=전체`)
+- 예약 중복 방지
+  - API 레벨 충돌 검사 (`409 Conflict`)
+  - PostgreSQL 환경에서는 `EXCLUDE` 제약으로 DB 레벨 보호
+- `Idempotency-Key` 기반 예약 생성 멱등 처리 (Redis)
+- 예약 조회 필터 + 페이지네이션
+  - `status`, `resource_id`, `from_at`, `to_at`, `limit`, `offset`
+- 표준 에러 응답 포맷 (일관된 에러 바디)
+- Audit Log 기록 (`signup`, `resource`, `reservation`)
 - 구조화 로그(JSON) + Request ID (`X-Request-ID`) 추적
-- 성공 응답 래퍼(2차): `X-Response-Envelope: true` (health/ready/auth/resources/reservations)
+- 선택형 성공 응답 래퍼 (`X-Response-Envelope: true`)
+- Alembic migration baseline
 - Ruff + Black + Pytest + GitHub Actions CI
 
 ---
 
-## 2) 기술 스택 (Tech Stack)
+## 🧱 Tech Stack
+
 - FastAPI
 - SQLAlchemy
-- PostgreSQL (default infra) / SQLite (local quick start)
+- PostgreSQL (권장) / SQLite (로컬 빠른 시작)
 - Redis
 - Alembic
 - Pytest
@@ -36,8 +39,9 @@ Production-minded reservation API template with auth, RBAC, and safe booking flo
 
 ---
 
-## 3) 환경 변수 (.env)
-`.env` 파일 예시:
+## ⚙️ Environment Variables
+
+`.env` 예시:
 
 ```env
 APP_ENV=dev
@@ -52,7 +56,10 @@ IDEMPOTENCY_LOCK_SECONDS=30
 
 ---
 
-## 4) 빠른 실행 (Quick Start)
+## 🚀 Quick Start
+
+### 1) Local (SQLite)
+
 ```bash
 python -m venv .venv
 .\.venv\Scripts\activate
@@ -61,17 +68,20 @@ python -m alembic upgrade head
 python -m uvicorn app.main:app --reload
 ```
 
-Windows one-command start:
+### 2) Windows helper scripts
+
 ```powershell
 ./scripts/dev_start.ps1
 ```
 
-Windows PostgreSQL start (docker compose + migration + run):
+### 3) PostgreSQL mode (Docker Compose + migration + run)
+
 ```powershell
 ./scripts/dev_start_pg.ps1
 ```
 
-Windows quality gate check:
+### 4) Quality Gate (format/lint/migration/test)
+
 ```powershell
 ./scripts/check.ps1
 ```
@@ -83,38 +93,37 @@ Swagger Docs:
 
 ---
 
-## 5) 테스트 (Tests)
+## 🧪 Tests
+
 ```bash
 python -m pytest -q
 ```
 
-Expected result:
-- `12 passed`
+Expected:
+- `14 passed`
 
 ---
 
-## 6) PostgreSQL 동시성 보호 (DB Constraint)
-- Alembic `0002_pg_exclusion_constraint`는 PostgreSQL에서만 적용됩니다.
-- `reservations` 테이블에 `EXCLUDE USING gist` 제약을 추가해, 동일 resource의 시간대 겹침(BOOKED 상태)을 DB 레벨에서 차단합니다.
+## 🔒 Reservation Safety Notes
+
+### 1) Overlap protection
+- 동일 리소스의 예약 시간 겹침은 `409` 반환
+- PostgreSQL에서는 `EXCLUDE USING gist`로 DB 레벨에서도 방어
+
+### 2) Resource deletion guard
+- **활성 예약(`BOOKED` + `end_at > now`)이 있으면** 리소스 삭제 불가 (`409`)
+- 과거 예약만 남아있으면 삭제 가능
+
+### 3) Idempotency-Key behavior
+- 헤더 없음: 일반 생성
+- 같은 Key + 같은 payload: 같은 결과 재반환
+- 같은 Key + 다른 payload: `409`
+- 같은 Key 요청 처리 중 중복 요청: `409 (in progress)`
 
 ---
 
-## 7) Idempotency-Key 동작 규칙
-- 헤더 없음: 기존과 동일하게 일반 예약 생성
-- 같은 `Idempotency-Key` + 같은 payload: 같은 예약 결과 재반환
-- 같은 `Idempotency-Key` + 다른 payload: `409`
-- 같은 `Idempotency-Key` 요청 처리 중 재호출: `409 (in progress)`
+## 📡 Main Endpoints
 
----
-
-## 8) 인프라 (Infra)
-```bash
-docker compose up -d
-```
-
----
-
-## 9) 주요 API (Main Endpoints)
 - `GET /health`
 - `GET /ready`
 - `POST /auth/signup`
@@ -123,14 +132,15 @@ docker compose up -d
 - `GET /resources` (auth)
 - `PATCH /resources/{resource_id}` (admin)
 - `DELETE /resources/{resource_id}` (admin)
-- `POST /reservations` (auth, optional `Idempotency-Key` header)
+- `POST /reservations` (auth, optional `Idempotency-Key`)
 - `PATCH /reservations/{reservation_id}` (owner/admin)
 - `GET /reservations` (auth)
 - `POST /reservations/{reservation_id}/cancel` (owner/admin)
 
 ---
 
-## 10) 표준 에러 응답 (Standard Error Body)
+## 🧯 Standard Error Response
+
 ```json
 {
   "timestamp": "2026-03-09T14:00:00Z",
@@ -143,10 +153,11 @@ docker compose up -d
 
 ---
 
-## 11) 프로젝트 구조 (Project Structure)
-- `app/api/routes.py` : API 엔드포인트
-- `app/core/security.py` : JWT, password hash
-- `app/core/errors.py` : 전역 예외 응답 포맷
+## 📁 Project Structure
+
+- `app/api/routes.py` : API endpoints
+- `app/core/security.py` : JWT/password hashing
+- `app/core/errors.py` : global exception mapping
 - `app/models.py` : User/Resource/Reservation/AuditLog
-- `alembic/` : DB migration scripts
-- `tests/` : API 테스트 코드
+- `alembic/` : migration scripts
+- `tests/` : test suite
