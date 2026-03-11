@@ -5,6 +5,17 @@ Production-minded reservation API template with auth, RBAC, safe booking flow, a
 
 ---
 
+## 🎯 Why this project
+
+단순 CRUD가 아니라, 실제 예약 도메인에서 자주 발생하는 문제를 다룹니다.
+
+- 동시 요청에서 같은 시간대 중복 예약 방지
+- 네트워크 재시도 시 중복 생성 방지(Idempotency-Key)
+- 권한 분리(USER/ADMIN)와 일관된 에러 응답
+- 테스트와 문서를 포함한 재현 가능한 개발 흐름
+
+---
+
 ## ✅ Features
 
 - Health/Readiness endpoint (`GET /health`, `GET /ready` with DB ping)
