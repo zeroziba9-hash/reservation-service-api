@@ -122,6 +122,79 @@ Expected:
 
 ---
 
+## 🧩 핵심 코드 예시 (Key Code Examples)
+
+### 1) 타임존 강제 + UTC 정규화
+```python
+def to_utc_naive(value: datetime, field_name: str) -> datetime:
+    if value.tzinfo is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} must include timezone (UTC recommended)",
+        )
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+```
+
+### 2) 예약 시간 겹침 검사
+```python
+def find_overlap(db: Session, *, resource_id: int, start_at: datetime, end_at: datetime):
+    return (
+        db.query(Reservation)
+        .filter(
+            Reservation.resource_id == resource_id,
+            Reservation.status == "BOOKED",
+            or_(
+                and_(Reservation.start_at <= start_at, Reservation.end_at > start_at),
+                and_(Reservation.start_at < end_at, Reservation.end_at >= end_at),
+                and_(Reservation.start_at >= start_at, Reservation.end_at <= end_at),
+            ),
+        )
+        .first()
+    )
+```
+
+### 3) Idempotency-Key 핵심 흐름
+```python
+if idempotency_key:
+    cached = redis.get(redis_data_key)
+    if cached:
+        # 같은 payload면 기존 결과 재반환
+        # 다른 payload면 409
+
+    lock_acquired = redis.set(redis_lock_key, request_hash, nx=True, ex=lock_seconds)
+    if not lock_acquired:
+        raise HTTPException(status_code=409, detail="request with same idempotency key is in progress")
+```
+
+### 4) 리소스 삭제 보호 로직 (활성 예약만 차단)
+```python
+now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+has_future_booked = (
+    db.query(Reservation)
+    .filter(
+        Reservation.resource_id == resource_id,
+        Reservation.status == "BOOKED",
+        Reservation.end_at > now_utc_naive,
+    )
+    .first()
+)
+if has_future_booked:
+    raise HTTPException(status_code=409, detail="resource has active reservations")
+```
+
+### 5) 조회 필터 구간 검증
+```python
+normalized_from_at = to_utc_naive(from_at, "from_at") if from_at else None
+normalized_to_at = to_utc_naive(to_at, "to_at") if to_at else None
+
+if normalized_from_at and normalized_to_at and normalized_from_at > normalized_to_at:
+    raise HTTPException(status_code=400, detail="from_at must be before or equal to to_at")
+```
+
+> 전체 구현은 `app/api/routes.py`, 검증 시나리오는 `tests/test_reservations.py` 참고.
+
+---
+
 ## 📡 Main Endpoints
 
 - `GET /health`
